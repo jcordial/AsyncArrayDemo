@@ -1,3 +1,5 @@
+const {Readable} = require('stream');
+
 // todo try other data sources
 // todo make static transformed repositories.
 class Provider {
@@ -5,16 +7,23 @@ class Provider {
         this._generator = generator;
     }
 
+    [Symbol.asyncIterator]() {
+        return this;
+    }
+
     next(...args) {
-        return this._generator().next(...args);
+        let next = this._generator().next(...args);
+        return next;
     }
 
     return(value) {
-        return this._generator().return(value);
+        let return1 = this._generator().return(value);
+        return return1;
     }
 
     throw(e) {
-        return this._generator().throw(e);
+        let throw1 = this._generator().throw(e);
+        return throw1;
     }
 }
 
@@ -31,13 +40,34 @@ class ReactiveArray {
     }
 
     /**
-     * @param {{}} options¬
+     * @param {{}} options
+     * @param {ReadableStream} options.stream
+     * @return {ReactiveArray.<T>}
+     */
+    static fromStream({stream}) {
+        async function* streamProvider() {
+            try {
+                for await (const chunk of stream) {
+                    yield chunk;
+                }
+            } catch (e) {
+                console.log(e);
+                throw e;
+
+            }
+        }
+
+        return new ReactiveArray(() => streamProvider)
+    }
+
+    /**
+     * @param {{}} options
      * @param {number} options.batchSize
      * @param {number} [options.pageOffset=0]
      * @param {function({batchSize:number, page:number}):Promise.<T[]>} options.getter
      * @return {ReactiveArray.<T>}
      */
-    static batch({batchSize, pageOffset = 0, getter}) {
+    static fromBatcher({batchSize, pageOffset = 0, getter}) {
         let fetched = [];
         let isLastBatch;
         let currentPage = pageOffset;
@@ -76,7 +106,7 @@ class ReactiveArray {
     static from(array) {
         const source = [...array];
 
-        function* fromProvider() {
+        async function* fromProvider() {
             while (source.length > 0) {
                 yield source.shift();
             }
@@ -169,7 +199,7 @@ class ReactiveArray {
             }
         }
 
-        return new ReactiveArray(mapProvider);
+        return new ReactiveArray(() => mapProvider);
     }
 
     collect(size = 1) {
@@ -184,8 +214,9 @@ class ReactiveArray {
             for await (const next of previousIterator) {
                 queue.push(next);
                 if (queue.length === size) {
-                    yield queue;
+                    const output = queue;
                     queue = [];
+                    yield output;
                 }
             }
             done = true;
@@ -194,7 +225,7 @@ class ReactiveArray {
             }
         }
 
-        return new ReactiveArray(collectProvider);
+        return new ReactiveArray(() => collectProvider);
     }
 
     /**
@@ -210,6 +241,13 @@ class ReactiveArray {
 
     [Symbol.asyncIterator]() {
         return new Provider(this._generatorFactory());
+    }
+
+    /**
+     * @return {ReadStream}
+     */
+    toStream() {
+        return Readable.from(new Provider(this._generatorFactory()));
     }
 }
 
